@@ -25,8 +25,12 @@ br = BandedRange(range = r, rowProperties=brp)
 
 
 # rData = RowData([CellData(ExtendedValue(x)) for x in range(5) for y in range(10)])
-rData = RowData([CellData(ExtendedValue(x)) for x in range(10)])
-gData = GridData(r.startRowIndex, r.startColumnIndex, [rData, rData])
+# rData = RowData([CellData(ExtendedValue(x)) for x in range(10)])
+interface_connections = InterfaceConnection.getInterfaceConnections(data_center='hkg1')
+rowData = []
+for ic in interface_connections:
+    rowData.append(ic.getSheetRowData())
+gData = GridData(r.startRowIndex, r.startColumnIndex, rowData)
 # gData = GridData(0, 0, rData)
 
 # s = Sheet( [gData], [br] )

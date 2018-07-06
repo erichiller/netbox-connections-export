@@ -49,7 +49,7 @@ class ExtendedValue(DictMask):
             self.numberValue = numberValue
         elif type(value) is bool:
             self.boolValue: bool = value
-        elif self.boolValue is not None:
+        elif hasattr(self, "boolValue") and self.boolValue is not None:
             self.boolValue = boolValue
         elif formulaValue is not None:
             self.formulaValue: str = formulaValue
@@ -149,6 +149,8 @@ class RowData(DictMask):
         values should be CellData[]
             a list of CellData
         """
+        if type(values) is not list:
+            raise TypeError("values for RowData _must_ be of type list")
         self.values: List[CellData] = values
         super().__init__(self.__dict__)
 

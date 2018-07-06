@@ -7,7 +7,7 @@ import requests
 import json
 
 from .common import Multiton
-from .sheet import RowData, CellData
+from .sheet import RowData, CellData, ExtendedValue
 from .secrets import NETBOX_SEND_HEADERS
 
 
@@ -18,7 +18,7 @@ info  = getLogger().info
 
 from pprint import pprint
 
-QUERY_SITE: str = "hkg1"
+SITE: str = "hkg1"
 
 T = TypeVar('T')
 
@@ -26,12 +26,112 @@ T = TypeVar('T')
 from enum import Enum
 
 
+
+
+class Print(object):
+    ANSI_CLEAR               = "\u001b[0m"
+    ANSI_CLEOL               = "\u001b[K"                           # CLEAR TO END OF LINE
+    ANSI_CLSML               = "\u001b[1K"                          # CLEAR SAME LINE
+    ANSI_RSCUR               = "\u001b[G"                           # RESET / MOVE the CURSOR to the line beginning
+
+    ANSI_BLACK               = "\u001b[30m"
+    ANSI_RED                 = "\u001b[31m"
+    ANSI_GREEN               = "\u001b[32m"
+    ANSI_YELLOW              = "\u001b[33m"
+    ANSI_BLUE                = "\u001b[34m"
+    ANSI_MAGENTA             = "\u001b[35m"
+    ANSI_CYAN                = "\u001b[36m"
+    ANSI_WHITE               = "\u001b[37m"
+
+    ANSI_BG_BLACK            = "\u001b[40m"
+    ANSI_BG_RED              = "\u001b[41m"
+    ANSI_BG_GREEN            = "\u001b[42m"
+    ANSI_BG_YELLOW           = "\u001b[43m"
+    ANSI_BG_BLUE             = "\u001b[44m"
+    ANSI_BG_MAGENTA          = "\u001b[45m"
+    ANSI_BG_CYAN             = "\u001b[46m"
+    ANSI_BG_WHITE            = "\u001b[47m"
+
+    @classmethod
+    def title(cls, title: str):
+        length = len(title)
+        ppsl = 4
+        ps = '*' * (length + (ppsl * 2) + 2)
+        pps = '*' * ppsl
+        if length > 0:
+            print(f"{Print.ANSI_BG_WHITE}{Print.ANSI_BLACK}{ps}\n{pps} {title} {pps}\n{ps}{Print.ANSI_CLEAR}{Print.ANSI_CLEOL}")
+    
+    @classmethod    
+    def green(cls, output: str):
+        color = Print.ANSI_GREEN
+        eol = Print.ANSI_CLEOL
+        clear = Print.ANSI_CLEAR
+        print(f"{color}{output}{eol}{clear}")
+
+
+    @classmethod
+    def green_bg(cls, output: str):
+        color = f"{Print.ANSI_BG_GREEN}{Print.ANSI_BLACK}"
+        eol = Print.ANSI_CLEOL
+        clear = Print.ANSI_CLEAR
+        print(f"{color}{output}{eol}{clear}")
+
+    @classmethod
+    def red_bg(cls, output: str):
+        color = f"{Print.ANSI_BG_RED}{Print.ANSI_BLACK}"
+        eol = Print.ANSI_CLEOL
+        clear = Print.ANSI_CLEAR
+        print(f"{color}{output}{eol}{clear}")
+
+    @classmethod
+    def magenta_bg(cls, output: str):
+        color = f"{Print.ANSI_BG_MAGENTA}{Print.ANSI_BLACK}"
+        eol = Print.ANSI_CLEOL
+        clear = Print.ANSI_CLEAR
+        print(f"{color}{output}{eol}{clear}")
+
+    @classmethod
+    def label_value(cls, label: str, value):
+        """ Output in the form of =>  label               : value """
+        # color = f"{Print.ANSI_BG_GREEN}{Print.ANSI_BLACK}"
+        # eol = Print.ANSI_CLEOL
+        # clear = Print.ANSI_CLEAR
+        # print(f"{color}{output}{eol}{clear}")
+        print(f"{label:<50} : {value}")
+
+    @classmethod
+    def progress(cls, complete, total, char_width=80):
+        """ Create dynmaically updating progress bar """
+        to_check = ( complete, total, char_width )
+        if not all( type(i) is int for i in to_check):
+            raise TypeError(f"all inputs must be of type int, {to_check}")
+        complete = complete + 1
+        to_check = ( complete, total, char_width )
+        if total != 0 and char_width != 0:
+            interval = total / char_width
+        if any( i == 0 for i in to_check):
+            raise ValueError(f"Inputs can not be 0, {to_check}")
+        else:
+            mod = ( interval ) % complete == 0
+            percent = complete / total
+            intervals = round( complete / interval)
+        if mod == 0:
+            print(f"{cls.ANSI_CLSML}{cls.ANSI_RSCUR} 0% [{percent:6.01%}] |{intervals * '='}" + ( " " * ( char_width - intervals ) ) +
+                "| 100%", end='')
+        if complete == total:
+            print("... complete")
+
+
 class NetboxQuery(Enum):
-    QUERY_RACKS                 = "/dcim/racks/"
-    QUERY_INTERFACE_CONNECTIONS = "/dcim/interface-connections/"
-    QUERY_DATACENTERS           = "/dcim/sites/"
-    QUERY_DEVICES               = "/dcim/devices/"
-    QUERY_DEVICE                = ( "/dcim/devices/", "id" )
+    """ Query Endpoints """
+
+    RACKS                 = "/dcim/racks/"
+    INTERFACECONNECTIONS  = "/dcim/interface-connections/"
+    INTERFACES            = "/dcim/interfaces/"
+    INTERFACE             = ( "/dcim/interfaces/", "id" )
+    DATACENTERS           = "/dcim/sites/"
+    DEVICES               = "/dcim/devices/"
+    DEVICE                = ( "/dcim/devices/", "id" )
 
 
 
@@ -43,6 +143,19 @@ def str_to_class(classname: str):
 
 class NetboxData:
     """ Base for all netbox data objects, provide basic helper functions """
+
+    # define mapping of json fields to objects to create
+    # must pass the object as a string because of issues with forward references
+    # to place the newly created object into the ``local_attr`` attribute of the instance
+    field_to_object_map = {
+        "device":       { "class": "Device", "obj_attr": "_device" },
+        "site":         { "class": "DataCenter", "obj_attr": "_datacenter" },
+        "datacenter":   { "class": "DataCenter", "obj_attr": "_datacenter" },
+        "rack":         { "class": "Rack", "obj_attr": "_rack" },
+        "interface":    { "class": "Interface", "obj_attr": "_interface" },
+        "interface_a":  { "class": "Interface", "obj_attr": "_interface_a" },
+        "interface_b":  { "class": "Interface", "obj_attr": "_interface_b" }
+    }
 
     def updateFromJson(self: T, jd: Dict[str, Any]) -> T:
         """ Update self with JSON """
@@ -70,39 +183,72 @@ class NetboxData:
         pprint(jd)
         print(f"<---- {'*'*30} jd into {cls.__name__}.jsonToObj {'*'*30}")
         if "url" in jd:
-            if cast(str, jd["url"]).find(NetboxQuery[f"QUERY_{cls.__name__}S".upper()].value) == -1:
+            if cast(str, jd["url"]).find(NetboxQuery[f"{cls.__name__}S".upper()].value) == -1:
                 return jd
         elif not all([True if identifier_field in jd else False for identifier_field in cls._identifier_fields ]):
-            info("identifier_fields check did not pass")
+            info(f"identifier_fields{cls._identifier_fields} check did not pass")
             return jd
         print(f"{'*'*30} PASS (NetboxData) {cls.__name__}.jsonToObj {'*'*30}")
-        # define mapping of json fields to objects to create
-        # must pass the object as a string because of issues with forward references
-        # optionally pass a Tuple( Type, local_attribute_name )
-        # to place the newly created object into the ``local_attr`` attribute of the instance
-        field_to_object_map = {
-            "device":   { "class": "Device" },
-            "site":     { "class": "DataCenter", "local_attr": "datacenter" },
-            "rack":     { "class": "Rack" }
-        }
         # copy jd into obj_args,
         # ``obj_args`` will be passed into class to create new instance
         obj_args = jd
-        for field in field_to_object_map:
-            if field in jd:
-                obj_args[field] = str_to_class(field["class"]).jsonToObj(jd[field]) if field in jd and type(jd[field]["id"]) is int else None
+        for json_field, field in cls.field_to_object_map.items():
+            if json_field in obj_args:
+                obj_attr = json_field if len(field) == 1 else field["obj_attr"]
+                Print.green_bg(f"**{cls.__name__}.jsonToObj ; setting {obj_attr} from {json_field}")
+                obj_args[obj_attr] = str_to_class(field["class"]).jsonToObj(jd[json_field]) if json_field in jd and type(jd[json_field]["id"]) is int else None
+                obj_args.pop(json_field)  # remove json_field
+        print(f"cls={cls}")
         instance = cls( **obj_args )
         return instance
-
-    @classmethod
 
     @classmethod
     def getIndex(cls, **kwargs) -> str:
         """ Return unique string for object """
         # if id not in kwargs and not all([True if identifier_field in kwargs else False for identifier_field in cls._identifier_fields ]):
-        if id not in kwargs:
-            raise IndexError(f"Indexable fields not present, unable to create index.\nEither all{cls._identifier_fields} or {cls.__name__}.id were not present\n{kwargs}")
+            # raise IndexError(f"Indexable fields not present, unable to create index.\nEither all{cls._identifier_fields} or {cls.__name__}.id were not present\n{kwargs}")
+        if "id" not in kwargs:
+            raise IndexError(f"-->\nIndexable fields not present, unable to create index.\n{cls.__name__}.id was not present\n{kwargs}\n<--")
         return kwargs["id"]
+
+    @classmethod
+    def setattr_helper(cls, attr_name: str, values) -> Any:
+        """ Return mapped field if necessary (for objects) """
+        Print.magenta_bg(f"setattr_helper\nattr_name: {attr_name}\nvalues: {values}")
+        if attr_name in cls.field_to_object_map and cls.field_to_object_map[attr_name]["obj_attr"] in values:
+            Print.green_bg(f"found {attr_name}")
+            return values[cls.field_to_object_map[attr_name]["obj_attr"]]
+        if attr_name in values:
+            return values[attr_name]
+        return None
+
+    @property
+    def datacenter(self) -> "DataCenter":
+        """ Return DataCenter object """
+        if type(self._datacenter) is not DataCenter:
+            NetboxRequest(NetboxQuery.DEVICE, {"id": self.id}, self)
+        return self._datacenter
+
+    @property
+    def rack(self) -> "Rack":
+        """ Return DataCenter object """
+        if type(self._rack) is not Rack:
+            NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
+        return self._rack
+
+    @property
+    def device(self) -> "Device":
+        """ Return Device object """
+        if type(self._device) is not Device:
+            NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
+        return self._device
+
+    @classmethod
+    @property
+    def query_class_all(cls) -> NetboxQuery:
+        """ Return endpoint for this device """
+        return NetboxQuery[f"{cls.__name__.__name__.upper()}S"]
+    
 
 
 
@@ -136,7 +282,7 @@ class NetboxRequest:
             )
         else:
             #NOTE: kill
-            query_parameters["limit"] = 1
+            query_parameters["limit"] = 5
             query_endpoint_str = str(query_endpoint.value)
         self.response: requests.Response = requests.get(
             self._BASE_URL + query_endpoint_str,
@@ -162,6 +308,7 @@ class DataCenter(Multiton, NetboxData):
     _identifier_fields = { "name": True, "physical_address": True }
 
     def __init__(self, **kwargs):
+        Print.red_bg(f"creating DataCenter object from {kwargs}")
         self.id_site: int = None
         self.name: str
         self.Racks: list = []
@@ -169,6 +316,7 @@ class DataCenter(Multiton, NetboxData):
 
         for key, val in kwargs.items():
             setattr(self, key, val)
+        Print.red_bg(f"created -> DataCenter object from {self.__dict__}")
 
     @classmethod
     def equivalency(cls, origin, test) -> bool:
@@ -178,14 +326,6 @@ class DataCenter(Multiton, NetboxData):
         if test.id_site and test.id_site == origin.id_site:
             return True
         return False
-
-    @classmethod
-    def getIndex(cls, **kwargs) -> str:
-        """ Return unique string for object """
-        print(kwargs)
-        if [ "name" in kwargs ]:
-            return kwargs["name"]
-        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
 
 class Rack(Multiton, NetboxData):
@@ -199,7 +339,7 @@ class Rack(Multiton, NetboxData):
         self.id: int = None
         self.id_facility: int = None
         self.name: str
-        self.datacenter: DataCenter
+        self._datacenter: DataCenter = self.__class__.setattr_helper("datacenter", kwargs)
 
         self.u_height: int = None
 
@@ -209,12 +349,12 @@ class Rack(Multiton, NetboxData):
         for key, val in kwargs.items():
             setattr(self, key, val)
 
-    @classmethod
-    def getIndex(cls, **kwargs) -> str:
-        """ Return unique string for object """
-        if all(x in kwargs for x in [ "name", "datacenter" ]):
-            return str( kwargs["name"] + "+" + kwargs["datacenter"].name)
-        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
+    # @classmethod
+    # def getIndex(cls, **kwargs) -> str:
+    #     """ Return unique string for object """
+    #     if all(x in kwargs for x in [ "name", "datacenter" ]):
+    #         return str( kwargs["name"] + "+" + kwargs["datacenter"].name)
+    #     raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
     @classmethod
     def equivalency(cls, origin, test) -> bool:
@@ -231,65 +371,28 @@ class Device(Multiton, NetboxData):
     """ Container for physical assets """
 
     _instances: dict = {}
-    _identifier_fields = { "rack_unit": False }
-
-    @classmethod
-    def jsonToObj(T, jd: Dict[str, Any], merge_object: T = None) -> Union[T, dict]:
-        """ Create initialized Interface from JSON """
-        if "url" in jd:
-            if cast(str, jd["url"]).find("/dcim/devices/") == -1:
-                return jd
-        elif "device_type" not in jd or "device_role" not in jd or "asset_tag" not in jd:
-            return jd
-        print(f"{'*'*30} jd into Device.jsonToObj {'*'*30} ---->")
-        pprint(jd)
-        print(f"<---- {'*'*30} jd into Device.jsonToObj {'*'*30}")
-        # normally this is used for JSONDecode to create a NEW instance, but it could also be used to update an existing object
-        if merge_object is None:
-            ic = Device()
-        else:
-            ic = merge_object
-        ic.id               = jd["id"]
-        ic.url              = jd["url"] if "url" in jd else None
-        ic.name             = jd["name"]
-        ic.display_name     = jd["display_name"]
-        ic._datacenter      = DataCenter.jsonToObj(jd["site"]) if "site" in jd and type(jd["site"]["id"]) is int else None
-        ic._rack            = Rack.jsonToObj(jd["rack"]) if "rack" in jd and type(jd["rack"]["id"]) is int else None
-        return ic
+    _identifier_fields = { "device_type": True }
 
     def __init__(self, **kwargs):
         """ Init Device """
         self.id: int                    = kwargs["id"] if "id" in kwargs else None
-        self._datacenter: DataCenter    = kwargs["datacenter"] if "datacenter" in kwargs else None
-        self._rack: Rack                = kwargs["rack"] if "rack" in kwargs else None
+        self._datacenter: DataCenter    = self.__class__.setattr_helper("datacenter", kwargs)
+        self._rack: Rack                = self.__class__.setattr_helper("rack", kwargs)
         self.url: str                   = kwargs["url"] if "url" in kwargs else None
         self.name: str                  = kwargs["name"] if "name" in kwargs else None
         self.display_name: str          = kwargs["display_name"] if "display_name" in kwargs else None
         self.asset_tag: str             = kwargs["asset_tag"] if "asset_tag" in kwargs else None
         self.rack_unit: int             = kwargs["rack_unit"] if "rack_unit" in kwargs else None
         self.obj_idx                    = None
-        for key, val in kwargs.items():
-            setattr(self, key, val)
+        # for key, val in kwargs.items():
+        #     setattr(self, key, val)
 
-    @property
-    def datacenter(self) -> DataCenter:
-        """ Return DataCenter object """
-        if type(self._datacenter) is not DataCenter:
-            NetboxRequest(NetboxQuery.QUERY_DEVICE, {"id": self.id}, self)
-        return self._datacenter
-
-    @property
-    def rack(self) -> Rack:
-        """ Return DataCenter object """
-        if type(self._rack) is not Rack:
-            Device.jsonToObj(NetboxRequest(NetboxQuery.QUERY_DEVICE, {"id": self.id}), self)
-        return self._rack
 
     # @property
     # def rack(self) -> Rack:
     #     """ Return DataCenter object """
     #     if type(self._datacenter) is not DataCenter:
-    #         Device.jsonToObj(NetboxRequest(NetboxQuery.QUERY_RACK, {"id": self.id}), self)
+    #         Device.jsonToObj(NetboxRequest(NetboxQuery.RACK, {"id": self.id}), self)
     #     return self._datacenter
 
     # @classmethod
@@ -313,23 +416,24 @@ class Device(Multiton, NetboxData):
 
 
 
-class Interface(Multiton):
+class Interface(Multiton, NetboxData):
     """ Interfaces exist on devices """
 
     _instances: dict = {}
+    _identifier_fields = {"mac_address": True, "lag": True}
 
-    @classmethod
-    def getIndex(cls, **kwargs) -> str:
-        """ Return unique string for object """
-        if all(x in kwargs for x in [ "name", "url" ]):
-            return str( kwargs["name"] + "+" + kwargs["url"])
-        raise IndexError(f"{kwargs} did not contain a name+url for Interface matching")
+    # @classmethod
+    # def getIndex(cls, **kwargs) -> str:
+    #     """ Return unique string for object """
+    #     if all(x in kwargs for x in [ "name", "url" ]):
+    #         return str( kwargs["name"] + "+" + kwargs["url"])
+    #     raise IndexError(f"{kwargs} did not contain a name+url for Interface matching")
 
     def __init__(self, **kwargs) -> None:
         """ Create """
         self.id: int                    = kwargs["id"] if "id" in kwargs else None
         self.url: str                   = kwargs["url"] if "url" in kwargs else None
-        self.device: Device             = kwargs["device"] if "device" in kwargs else None
+        self._device: Device            = self.__class__.setattr_helper("device", kwargs)
         self.name: str                  = kwargs["name"] if "name" in kwargs else None
         # this should be a new type of InterfaceFormFactor object; value, label attrs
         self.form_factor: dict          = kwargs["form_factor"] if "form_factor" in kwargs else None
@@ -340,55 +444,17 @@ class Interface(Multiton):
         self.mgmt_only: bool            = kwargs["mgmt_only"] if "mgmt_only" in kwargs else None
         self.description: str           = kwargs["description"] if "description" in kwargs else None
         self.obj_idx = None
-
-
-
-    @classmethod
-    def jsonToObj(T, jd: Dict, merge_object: T = None) -> Union[T, dict]:
-        """ Create initialized Interface from JSON """
-        if "device" not in jd or "form_factor" not in jd or "lag" not in jd or "mtu" not in jd:
-            return jd
-        # normally this is used for JSONDecode to create a NEW instance, but it could also be used to update an existing object
-
-        print(f"{'*'*30} jd into Interface.jsonToObj {'*'*30} ---->")
-        pprint(jd)
-        print(f"<---- {'*'*30} jd into Interface.jsonToObj {'*'*30}")
-        if merge_object is None:
-            ic = Interface(
-                id            = jd["id"],
-                url           = jd["url"],
-                device        = Device.jsonToObj(jd["device"]),
-                name          = jd["name"],
-                form_factor   = jd["form_factor"],
-                enabled       = jd["enabled"],
-                lag           = jd["lag"],
-                mtu           = jd["mtu"],
-                mac_address   = jd["mac_address"],
-                mgmt_only     = jd["mgmt_only"],
-                description   = jd["description"],
-            )
-        else:
-            ic = merge_object
-            ic.id            = jd["id"],
-            ic.url           = jd["url"],
-            ic.device        = Device.jsonToObj(jd["device"]),
-            ic.name          = jd["name"],
-            ic.form_factor   = jd["form_factor"],
-            ic.enabled       = jd["enabled"],
-            ic.lag           = jd["lag"],
-            ic.mtu           = jd["mtu"],
-            ic.mac_address   = jd["mac_address"],
-            ic.mgmt_only     = jd["mgmt_only"],
-            ic.description   = jd["description"],
-        pprint(ic)
-        return ic
+    
 
 
 class InterfaceConnection(Multiton, NetboxData):
     """ Connect two Interfaces """
 
+    _instances: dict = {}
+    _identifier_fields = {"interface_a": True, "interface_b": True}
+
     @classmethod
-    def getInterfaceConnections(cls: T, data_center: Union[DataCenter, str] = QUERY_SITE, rack: Union[DataCenter, str, None] = None) -> List[T]:
+    def getInterfaceConnections(cls, data_center: Union[DataCenter, str] = SITE, rack: Union[DataCenter, str, None] = None) -> List["InterfaceConnection"]:
         """ Get List of InterfaceConnection matching input params """
         query_parameters: Dict[str, str] = {}
         if data_center is not None:
@@ -401,70 +467,50 @@ class InterfaceConnection(Multiton, NetboxData):
                 query_parameters["q"] = rack.lower()
             elif type(rack) is Rack:
                 query_parameters["q"] = rack.name.lower()
-        r = NetboxRequest(NetboxQuery.QUERY_INTERFACE_CONNECTIONS, query_parameters)
+        r = NetboxRequest(NetboxQuery.INTERFACECONNECTIONS, query_parameters)
         pprint(r.__dict__)
         return r.response.json(object_hook=InterfaceConnection.jsonToObj)["results"]
 
-    @classmethod
-    def jsonToObj(T, jd: dict) -> Union[T, dict]:
-        """ Create InterfaceConnection from JSON """
-        if "interface_a" not in jd or "interface_b" not in jd:
-            return jd
-        print(f"{'*'*30} jd into InterfaceConnections.jsonToObj {'*'*30} ---->")
-        pprint(jd)
-        print(f"<---- {'*'*30} jd into InterfaceConnections.jsonToObj {'*'*30}")
-        ic = InterfaceConnection(
-            id = jd["id"],
-            interface_a = Interface.jsonToObj(jd["interface_a"]),
-            interface_b = Interface.jsonToObj(jd["interface_b"]),
-            connection_status = jd["connection_status"]
-        )
-        ic.id = jd["id"]
-        ic.interface_a = Interface.jsonToObj(jd["interface_a"])
-        ic.interface_b = Interface.jsonToObj(jd["interface_b"])
-        ic.connection_status = jd["connection_status"]
-        print(f"{'*'*30} jd //PASS// InterfaceConnections.jsonToObj {'*'*30}")
-        pprint(ic)
-        return ic
-
-    def __init__(self):
+    def __init__(self, **kwargs):
         """ Create """
         self.id: int
-        self.interface_a: Interface
-        self.interface_b: Interface
+        self._interface_a: Interface = self.__class__.setattr_helper("interface_a", kwargs)
+        self._interface_b: Interface = self.__class__.setattr_helper("interface_b", kwargs)
         self.connection_status: dict = {
             "value": bool,
             "label": str
         }
+        for k in kwargs:
+            setattr(self, k, kwargs[k])
 
     def getSheetRowData(self) -> RowData:
         """ Create RowData for Sheets from this object """
         return RowData(
             [
                 # checkbox
-                CellData( self.connection_status ),
+                CellData( ExtendedValue( True if self.connection_status["value"] is True else False ) ),
                 # border 1
-                CellData( self.interface_a.name ),
-                CellData( self.interface_a.device.name ),
-                CellData( self.interface_a.device.rack_unit ),
-                CellData( self.interface_a.device.rack.name ),
+                CellData( ExtendedValue( self.interface_a.name ) ),
+                CellData( ExtendedValue( self.interface_a.device.name ) ),
+                CellData( ExtendedValue( self.interface_a.device.rack_unit ) ),
+                CellData( ExtendedValue( self.interface_a.device.rack.name ) ),
                 # border 2
-                CellData( self.interface_b.name ),
-                CellData( self.interface_b.device.name ),
-                CellData( self.interface_b.device.rack_unit ),
-                CellData( self.interface_b.device.rack.name )
+                CellData( ExtendedValue( self.interface_b.name ) ),
+                CellData( ExtendedValue( self.interface_b.device.name ) ),
+                CellData( ExtendedValue( self.interface_b.device.rack_unit ) ),
+                CellData( ExtendedValue( self.interface_b.device.rack.name ) )
             ])
 
-    @classmethod
-    def getIndex(cls, **kwargs) -> str:
-        """ Return unique string for object """
-        if all(x in kwargs for x in [ "name", "datacenter", "rack" ]):
-            plus = ""
-            if "rack_unit" in kwargs:
-                plus = str("+" + kwargs["rack_unit"])
-            return str( kwargs["name"] + "+" + kwargs["datacenter"].name + "+" + kwargs["rack"].name + plus)
-        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
+    @property
+    def interface_a(self) -> Interface:
+        """ Return DataCenter object """
+        if type(self._interface_a) is not Rack:
+            NetboxRequest(NetboxQuery.INTERFACE, {"id": self.id}, self)
+        return self._interface_a
 
-
-
-
+    @property
+    def interface_b(self) -> Interface:
+        """ Return DataCenter object """
+        if type(self._interface_b) is not Rack:
+            NetboxRequest(NetboxQuery.INTERFACE, {"id": self.id}, self)
+        return self._interface_b
