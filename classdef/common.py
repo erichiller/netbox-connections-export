@@ -11,7 +11,9 @@ class Multiton(object):
 
     def __new__(cls, *args, **kwargs):
         """ Restrict instances to the first one """
-        obj_idx: str = cls.getIndex()
+        print(f"Multiton.__new__")
+        print(kwargs)
+        obj_idx: str = cls.getIndex(**kwargs)
         # this code assumes that the first parameter input is the key
         if hasattr(cls, '_instances') and obj_idx in cls._instances:
             # print(f"{'Multiton has_attr DUPLICATE':!>130}\n\t{cls}\n\t{obj_idx}")
