@@ -17,6 +17,8 @@ class Multiton(object):
         # this code assumes that the first parameter input is the key
         if hasattr(cls, '_instances') and obj_idx in cls._instances:
             # print(f"{'Multiton has_attr DUPLICATE':!>130}\n\t{cls}\n\t{obj_idx}")
+            for attr in kwargs:
+                cls._instances[obj_idx][attr] = kwargs[attr]
             return cls._instances[obj_idx]
         # wasn't found, so add an instance
         instance = object.__new__(cls)

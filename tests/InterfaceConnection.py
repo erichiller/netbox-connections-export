@@ -30,5 +30,5 @@ pprint(ic, indent=2)
 pprint(ic[0].__dict__, indent=2)
 
 print(f"{'*'*25} InterfaceConnection.interface_a.device.datacenter {'*'*25}")
-pprint(ic[0].interface_a.device.datacenter)
+pprint(ic[0].interface_a.device.datacenter.name)
 

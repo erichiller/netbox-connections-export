@@ -35,6 +35,11 @@ class NetboxQuery(Enum):
 
 
 
+def str_to_class(classname: str):
+    """ Input a string and returns the class object named it """
+    import sys
+    return getattr(sys.modules[__name__], classname)
+
 
 class NetboxData:
     """ Base for all netbox data objects, provide basic helper functions """
@@ -44,8 +49,24 @@ class NetboxData:
         return self.__class__.jsonToObj(jd, self)
 
     @classmethod
-    def jsonToObj(cls: T, jd: Dict[str, Any]) -> Union[T, dict]:
-        print(f"{'*'*30} jd into {cls.__name__}.jsonToObj {'*'*30} ---->")
+    def jsonToObj(cls: T, jd: Dict[str, Any], merge_object: T = None) -> Union[T, dict]:
+        """ Input json object and create/update object
+
+        shared jsonToObj from base ``NetboxData``
+
+        Parameters
+        ----------
+        jd : Dict[str, any]
+            this is the input json dict
+        merge_object : T
+            Accepts an instance of the object this is a class of
+            if None:
+                return new object
+            else:
+                The object provided by ``merge_object`` is updated
+
+        """
+        print(f"{'*'*30} jd into (NetboxData) {cls.__name__}.jsonToObj {'*'*30} ---->")
         pprint(jd)
         print(f"<---- {'*'*30} jd into {cls.__name__}.jsonToObj {'*'*30}")
         if "url" in jd:
@@ -55,8 +76,33 @@ class NetboxData:
             info("identifier_fields check did not pass")
             return jd
         print(f"{'*'*30} PASS (NetboxData) {cls.__name__}.jsonToObj {'*'*30}")
-        instance = cls( **jd )
+        # define mapping of json fields to objects to create
+        # must pass the object as a string because of issues with forward references
+        # optionally pass a Tuple( Type, local_attribute_name )
+        # to place the newly created object into the ``local_attr`` attribute of the instance
+        field_to_object_map = {
+            "device":   { "class": "Device" },
+            "site":     { "class": "DataCenter", "local_attr": "datacenter" },
+            "rack":     { "class": "Rack" }
+        }
+        # copy jd into obj_args,
+        # ``obj_args`` will be passed into class to create new instance
+        obj_args = jd
+        for field in field_to_object_map:
+            if field in jd:
+                obj_args[field] = str_to_class(field["class"]).jsonToObj(jd[field]) if field in jd and type(jd[field]["id"]) is int else None
+        instance = cls( **obj_args )
         return instance
+
+    @classmethod
+
+    @classmethod
+    def getIndex(cls, **kwargs) -> str:
+        """ Return unique string for object """
+        # if id not in kwargs and not all([True if identifier_field in kwargs else False for identifier_field in cls._identifier_fields ]):
+        if id not in kwargs:
+            raise IndexError(f"Indexable fields not present, unable to create index.\nEither all{cls._identifier_fields} or {cls.__name__}.id were not present\n{kwargs}")
+        return kwargs["id"]
 
 
 
@@ -139,8 +185,7 @@ class DataCenter(Multiton, NetboxData):
         print(kwargs)
         if [ "name" in kwargs ]:
             return kwargs["name"]
-        IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
-        return "IndexError"
+        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
 
 class Rack(Multiton, NetboxData):
@@ -169,8 +214,7 @@ class Rack(Multiton, NetboxData):
         """ Return unique string for object """
         if all(x in kwargs for x in [ "name", "datacenter" ]):
             return str( kwargs["name"] + "+" + kwargs["datacenter"].name)
-        IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
-        return "IndexError"
+        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
     @classmethod
     def equivalency(cls, origin, test) -> bool:
@@ -187,6 +231,7 @@ class Device(Multiton, NetboxData):
     """ Container for physical assets """
 
     _instances: dict = {}
+    _identifier_fields = { "rack_unit": False }
 
     @classmethod
     def jsonToObj(T, jd: Dict[str, Any], merge_object: T = None) -> Union[T, dict]:
@@ -247,16 +292,15 @@ class Device(Multiton, NetboxData):
     #         Device.jsonToObj(NetboxRequest(NetboxQuery.QUERY_RACK, {"id": self.id}), self)
     #     return self._datacenter
 
-    @classmethod
-    def getIndex(cls, **kwargs) -> str:
-        """ Return unique string for object """
-        if all(x in kwargs for x in [ "name", "datacenter", "rack" ]):
-            plus = ""
-            if "rack_unit" in kwargs:
-                plus = str("+" + kwargs["rack_unit"])
-            return str( kwargs["name"] + "+" + kwargs["datacenter"].name + "+" + kwargs["rack"].name + plus)
-        IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
-        return "IndexError"
+    # @classmethod
+    # def getIndex(cls, **kwargs) -> str:
+    #     """ Return unique string for object """
+    #     if all(x in kwargs for x in [ "name", "datacenter", "rack" ]):
+    #         plus = ""
+    #         if "rack_unit" in kwargs:
+    #             plus = str("+" + kwargs["rack_unit"])
+    #         return str( kwargs["name"] + "+" + kwargs["datacenter"].name + "+" + kwargs["rack"].name + plus)
+    #     raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
     @classmethod
     def equivalency(cls, origin, test) -> bool:
@@ -279,8 +323,7 @@ class Interface(Multiton):
         """ Return unique string for object """
         if all(x in kwargs for x in [ "name", "url" ]):
             return str( kwargs["name"] + "+" + kwargs["url"])
-        IndexError(f"{kwargs} did not contain a name+url for Interface matching")
-        return "IndexError"
+        raise IndexError(f"{kwargs} did not contain a name+url for Interface matching")
 
     def __init__(self, **kwargs) -> None:
         """ Create """
@@ -345,7 +388,7 @@ class InterfaceConnection(Multiton, NetboxData):
     """ Connect two Interfaces """
 
     @classmethod
-    def getInterfaceConnections(T, data_center: Union[DataCenter, str] = QUERY_SITE, rack: Union[DataCenter, str, None] = None) -> List[T]:
+    def getInterfaceConnections(cls: T, data_center: Union[DataCenter, str] = QUERY_SITE, rack: Union[DataCenter, str, None] = None) -> List[T]:
         """ Get List of InterfaceConnection matching input params """
         query_parameters: Dict[str, str] = {}
         if data_center is not None:
@@ -370,7 +413,12 @@ class InterfaceConnection(Multiton, NetboxData):
         print(f"{'*'*30} jd into InterfaceConnections.jsonToObj {'*'*30} ---->")
         pprint(jd)
         print(f"<---- {'*'*30} jd into InterfaceConnections.jsonToObj {'*'*30}")
-        ic = InterfaceConnection()
+        ic = InterfaceConnection(
+            id = jd["id"],
+            interface_a = Interface.jsonToObj(jd["interface_a"]),
+            interface_b = Interface.jsonToObj(jd["interface_b"]),
+            connection_status = jd["connection_status"]
+        )
         ic.id = jd["id"]
         ic.interface_a = Interface.jsonToObj(jd["interface_a"])
         ic.interface_b = Interface.jsonToObj(jd["interface_b"])
@@ -415,8 +463,7 @@ class InterfaceConnection(Multiton, NetboxData):
             if "rack_unit" in kwargs:
                 plus = str("+" + kwargs["rack_unit"])
             return str( kwargs["name"] + "+" + kwargs["datacenter"].name + "+" + kwargs["rack"].name + plus)
-        IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
-        return "IndexError"
+        raise IndexError(f"{kwargs} did not contain a name+datacenter for Rack matching")
 
 
 
