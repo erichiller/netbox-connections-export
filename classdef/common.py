@@ -1,6 +1,7 @@
 """ Shared base class definitions """
 
 from pprint import pprint
+from .cache_manager import stash, unstash
 
 class Multiton(object):
     """ Single Globally Uniquely ID / keyed object, use by subclassing Multiton

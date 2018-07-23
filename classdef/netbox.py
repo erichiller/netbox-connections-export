@@ -8,6 +8,7 @@ import json
 
 from .common import Multiton
 from .sheet import RowData, CellData, ExtendedValue
+import classdef.sheet as sheet
 from .secrets import NETBOX_SEND_HEADERS
 
 
@@ -116,8 +117,7 @@ class Print(object):
             percent = complete / total
             intervals = round( complete / interval)
         if mod == 0:
-            print(f"{cls.ANSI_CLSML}{cls.ANSI_RSCUR} 0% [{percent:6.01%}] |{intervals * '='}" + ( " " * ( char_width - intervals ) ) +
-                "| 100%", end='')
+            print(f"{cls.ANSI_CLSML}{cls.ANSI_RSCUR} 0% [{percent:6.01%}] |{intervals * '='}" + ( " " * ( char_width - intervals ) ) + "| 100%", end='')
         if complete == total:
             print("... complete")
 
@@ -488,7 +488,10 @@ class InterfaceConnection(Multiton, NetboxData):
         return RowData(
             [
                 # checkbox
-                CellData( ExtendedValue( True if self.connection_status["value"] is True else False ) ),
+                CellData( 
+                    userEnteredValue = ExtendedValue( True if self.connection_status["value"] is True else False ),
+                    dataValidation = sheet.DataValidationRule( sheet.BooleanCondition( sheet.ConditionType.BOOLEAN ) )
+                ),
                 # border 1
                 CellData( ExtendedValue( self.interface_a.name ) ),
                 CellData( ExtendedValue( self.interface_a.device.name ) ),

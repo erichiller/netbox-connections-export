@@ -9,6 +9,7 @@ if ROOT_PATH not in sys.path:
 
 from .sheet import Spreadsheet, SpreadsheetProperties, ExtendedValue, GridRange, Color, CellData, RowData, GridData, BandingProperties, BandedRange, DictMask, ConditionalFormatRule, ProtectedRange, BasicFilter, FilterView, EmbeddedChart, NamedRange, DimensionGroup, DeveloperMetadata, Sheet
 from .netbox import Interface, InterfaceConnection, Device, Rack, DataCenter
+from .cache_manager import stash, unstash
 
 
 __all__ = [
@@ -36,5 +37,7 @@ __all__ = [
     "InterfaceConnection",
     "Device",
     "Rack",
-    "DataCenter"
+    "DataCenter",
+    "stash",
+    "unstash"
 ]

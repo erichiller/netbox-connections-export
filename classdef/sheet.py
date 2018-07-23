@@ -13,7 +13,11 @@ class DictMask(dict):
 
     def __init__(self, *args, **kw) -> None:
         """ Init """
-        super().__init__(*args, **kw)
+        none_less_args = [v for v in args if v is not None]
+        none_less_kw   = {k: v for k, v in kw.items() if v is not None}
+
+        super().__init__(*none_less_args, **none_less_kw)
+        # super().__init__(*args, **kw)
         self.itemlist = super().keys()
 
     def __setitem__(self, key, value):
@@ -81,6 +85,94 @@ class GridRange(DictMask):
         super().__init__(self.__dict__)
 
 
+class ConditionType(DictMask):
+    """ Enum, type of condition """
+
+    CONDITION_TYPE_UNSPECIFIED = 0x00
+    NUMBER_GREATER             = 0x01
+    NUMBER_GREATER_THAN_EQ     = 0x02
+    NUMBER_LESS                = 0x03
+    NUMBER_LESS_THAN_EQ        = 0x04
+    NUMBER_EQ                  = 0x05
+    NUMBER_NOT_EQ              = 0x06
+    NUMBER_BETWEEN             = 0x07
+    NUMBER_NOT_BETWEEN         = 0x08
+    TEXT_CONTAINS              = 0x09
+    TEXT_NOT_CONTAINS          = 0x0A
+    TEXT_STARTS_WITH           = 0x0B
+    TEXT_ENDS_WITH             = 0x0C
+    TEXT_EQ                    = 0x0D
+    TEXT_IS_EMAIL              = 0x0E
+    TEXT_IS_URL                = 0x0F
+    DATE_EQ                    = 0x10
+    DATE_BEFORE                = 0x12
+    DATE_AFTER                 = 0x13
+    DATE_ON_OR_BEFORE          = 0x14
+    DATE_ON_OR_AFTER           = 0x15
+    DATE_BETWEEN               = 0x16
+    DATE_NOT_BETWEEN           = 0x17
+    DATE_IS_VALID              = 0x18
+    ONE_OF_RANGE               = 0x19
+    ONE_OF_LIST                = 0x1A
+    BLANK                      = 0x1B
+    NOT_BLANK                  = 0x1C
+    CUSTOM_FORMULA             = 0x1D
+    BOOLEAN                    = 0x1E
+
+
+class RelativeDate(DictMask):
+    """ Controls how a date is evaluated """
+
+    RELATIVE_DATE_UNSPECIFIED = 0x00
+    PAST_YEAR                 = 0x01
+    PAST_MONTH                = 0x02
+    PAST_WEEK                 = 0x03
+    YESTERDAY                 = 0x04
+    TODAY                     = 0x05
+    TOMORROW                  = 0x06
+
+
+class ConditionValue(DictMask):
+    """ Value of a condition """
+
+    def __init__(self,
+                 relativeDate: Optional[RelativeDate] = None,
+                 userEnteredValue: Optional[str] = None ) -> None:
+        self.relativeDate = relativeDate
+        self.userEnteredValue = userEnteredValue
+        super().__init__(self.__dict__)
+
+
+
+class BooleanCondition(DictMask):
+    """ Condition that the data must match """
+    def __init__(self,
+                 type: Optional[ConditionType] = None,
+                 values: Optional[List[ConditionValue]] = None ) -> None:
+        self.type   = type
+        self.values = values
+        super().__init__(self.__dict__)
+
+
+
+class DataValidationRule(DictMask):
+    """ A data validation rule.
+
+    https://developers.google.com/sheets/api/reference/rest/v4/spreadsheets#DataValidationRule
+    """
+
+    def __init__(self,
+                 condition: BooleanCondition = BooleanCondition(),
+                 inputMessage: Optional[str] = None,
+                 strict: Optional[bool] = None,
+                 showCustomUi: Optional[bool] = None ) -> None:
+        self.condition    = condition
+        self.inputMessage = inputMessage
+        self.strict       = strict
+        self.showCustomUi = showCustomUi
+        super().__init__(self.__dict__)
+
+
 
 class Color(DictMask):
     def __init__(self,
@@ -113,7 +205,7 @@ class CellData(DictMask):
                  hyperlink: Optional[str] = None,
                  note: Optional[str] = None,
                  textFormatRuns = None,
-                 dataValidation = None,
+                 dataValidation: Optional[DataValidationRule] = None,
                  pivotTable = None) -> None:
         """ Init """
         if type(userEnteredValue) is not ExtendedValue:
@@ -130,7 +222,7 @@ class CellData(DictMask):
         if note is not None:
             self.note: Optional[str] = note
         #   textFormatRuns: [ { TextFormatRun } ]
-        #   dataValidation: {DataValidationRule }
+        self.dataValidation: Optional[DataValidationRule] = dataValidation
         #   pivotTable: { PivotTable }
         super().__init__(self.__dict__)
 

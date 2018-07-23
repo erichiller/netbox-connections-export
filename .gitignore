@@ -4,3 +4,4 @@ secrets.*
 .mypy_cache/**
 __pycache__/**
 *.pyc
+*.pkl

@@ -1,5 +1,7 @@
-import sys
+""" application loader for netbox-export-connections , for netbox -> sheets """
 import os
+import sys
+from typing import Optional, List
 
 ROOT_PATH = os.path.abspath( os.path.join( __file__, ".." ) )
 if ROOT_PATH not in sys.path:
@@ -15,6 +17,9 @@ import json
 from oauth2client import file, client, tools
 
 from classdef import *
+
+unstash()
+
 
 r = GridRange(1, 10, 1, 10)
 brp = BandingProperties( headerColor = Color(50, 50, 50, 100),
@@ -50,13 +55,18 @@ pprint(ss, indent=2, compact=False )
 
 
 
+
+stash()
+
+
 spreadsheet_body = json.dumps(ss)
 print(spreadsheet_body)
 # pprint(json.loads(spreadsheet_body), indent=4)
 
 # print(spreadsheet_body)
 
-# exit()
+
+exit()
 
 # Setup the Sheets API
 SCOPES = 'https://www.googleapis.com/auth/drive'
