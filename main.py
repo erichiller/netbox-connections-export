@@ -85,7 +85,6 @@ print(spreadsheet_body)
 
 
 
-exit()
 
 # Setup the Sheets API
 SCOPES = 'https://www.googleapis.com/auth/drive'
@@ -97,6 +96,7 @@ if not creds or creds.invalid:
 service = build('sheets', 'v4', http=creds.authorize(Http()))
 
 request = service.spreadsheets().create(body=ss)
+# request = service.spreadsheets().create(body=spreadsheet_body)
 response = request.execute()
 
 # TODO: Change code below to process the `response` dict:

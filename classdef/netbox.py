@@ -290,7 +290,7 @@ class NetboxRequest:
         # input(sorted(self.query_parameters.items()).__repr__())
         encoded_query = base64.b32encode(self.query_endpoint.__repr__().encode() + sorted(self.query_parameters.items()).__repr__().encode()).decode()
         pkl_file_name = os.path.join(self.cache_dir, f'cache_{encoded_query}.pkl')
-        input(f"Confirm:\n\tpkl_file_name: {pkl_file_name}\n\tcache_dir: {self.cache_dir}\n\tself.query_endpoint.__repr__().encode(): {self.query_endpoint.__repr__().encode()}\n\tsorted(self.query_parameters.items()).__repr__().encode(){sorted(self.query_parameters.items()).__repr__().encode()}\n???")
+        # input(f"Confirm:\n\tpkl_file_name: {pkl_file_name}\n\tcache_dir: {self.cache_dir}\n\tself.query_endpoint.__repr__().encode(): {self.query_endpoint.__repr__().encode()}\n\tsorted(self.query_parameters.items()).__repr__().encode(){sorted(self.query_parameters.items()).__repr__().encode()}\n???")
         return pkl_file_name
 
 
@@ -432,10 +432,16 @@ class Device(Multiton, NetboxData):
         self.name: str                  = kwargs["name"] if "name" in kwargs else None
         self.display_name: str          = kwargs["display_name"] if "display_name" in kwargs else None
         self.asset_tag: str             = kwargs["asset_tag"] if "asset_tag" in kwargs else None
-        self.rack_unit: int             = kwargs["rack_unit"] if "rack_unit" in kwargs else None
+        self._rack_unit: int             = kwargs["rack_unit"] if "rack_unit" in kwargs else None
         # for key, val in kwargs.items():
         #     setattr(self, key, val)
 
+    @property
+    def rack_unit(self) -> int:
+        """ Return Device object """
+        if type(self._rack_unit) is not int:
+            NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
+        return self._device
 
     # @property
     # def rack(self) -> Rack:

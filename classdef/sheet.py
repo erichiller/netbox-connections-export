@@ -149,8 +149,10 @@ class BooleanCondition(DictMask):
     def __init__(self,
                  type: Optional[ConditionType] = None,
                  values: Optional[List[ConditionValue]] = None ) -> None:
-        self.type   = type
-        self.values = values
+        if type is not None:
+            self.type   = type
+        if values is not None:
+            self.values = values
         super().__init__(self.__dict__)
 
 
@@ -166,10 +168,15 @@ class DataValidationRule(DictMask):
                  inputMessage: Optional[str] = None,
                  strict: Optional[bool] = None,
                  showCustomUi: Optional[bool] = None ) -> None:
-        self.condition    = condition
-        self.inputMessage = inputMessage
-        self.strict       = strict
-        self.showCustomUi = showCustomUi
+        
+        if condition is not None:
+            self.condition    = condition
+        if inputMessage is not None:
+            self.inputMessage = inputMessage
+        if strict is not None:
+            self.strict       = strict
+        if showCustomUi is not None:
+            self.showCustomUi = showCustomUi
         super().__init__(self.__dict__)
 
 
@@ -222,7 +229,8 @@ class CellData(DictMask):
         if note is not None:
             self.note: Optional[str] = note
         #   textFormatRuns: [ { TextFormatRun } ]
-        self.dataValidation: Optional[DataValidationRule] = dataValidation
+        if dataValidation is not None:
+            self.dataValidation: Optional[DataValidationRule] = dataValidation
         #   pivotTable: { PivotTable }
         super().__init__(self.__dict__)
 
