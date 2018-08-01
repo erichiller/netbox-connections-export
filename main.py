@@ -18,8 +18,23 @@ from oauth2client import file, client, tools
 
 from classdef import *
 
-unstash()
+d = NetboxRequest(NetboxQuery.DEVICE, {"id": 1531}, json_callback = Device.jsonToObj)
 
+# print("-----instances----->")
+# print(Device._instances)
+# print("<-----instances-----")
+
+# stash(Device)
+
+# print("\n" * 10)
+
+# unstash()
+
+# print("-----instances----->")
+# print(Device._instances)
+# print("<-----instances-----")
+
+# exit()
 
 r = GridRange(1, 10, 1, 10)
 brp = BandingProperties( headerColor = Color(50, 50, 50, 100),
@@ -56,14 +71,18 @@ pprint(ss, indent=2, compact=False )
 
 
 
-stash()
+# # stash()
 
+# from pprint import pprint
+# pprint(Devices._instances)
+# inputs("Continue?")
 
 spreadsheet_body = json.dumps(ss)
 print(spreadsheet_body)
 # pprint(json.loads(spreadsheet_body), indent=4)
 
 # print(spreadsheet_body)
+
 
 
 exit()

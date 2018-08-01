@@ -1,125 +1,39 @@
 """ Netbox classes """
 
-from typing import Dict, Optional, List, Union, TypeVar, Any, cast
+from typing import Dict, Optional, List, Union, TypeVar, Any, cast, Tuple, Callable
 from logging import getLogger
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import json
+import base64
+import pickle
+import os
+from copy import deepcopy
+from pprint import pprint
 
 from .common import Multiton
 from .sheet import RowData, CellData, ExtendedValue
-import classdef.sheet as sheet
+from classdef import sheet
 from .secrets import NETBOX_SEND_HEADERS
+from .print_color import Print
+
+from copy import copy
 
 
-getLogger().setLevel(0)
+# getLogger().setLevel(0)
+getLogger().setLevel(40)
+trace = getLogger().debug
 debug = getLogger().debug
 info  = getLogger().info
 
-
-from pprint import pprint
 
 SITE: str = "hkg1"
 
 T = TypeVar('T')
 
-
-from enum import Enum
-
-
-
-
-class Print(object):
-    ANSI_CLEAR               = "\u001b[0m"
-    ANSI_CLEOL               = "\u001b[K"                           # CLEAR TO END OF LINE
-    ANSI_CLSML               = "\u001b[1K"                          # CLEAR SAME LINE
-    ANSI_RSCUR               = "\u001b[G"                           # RESET / MOVE the CURSOR to the line beginning
-
-    ANSI_BLACK               = "\u001b[30m"
-    ANSI_RED                 = "\u001b[31m"
-    ANSI_GREEN               = "\u001b[32m"
-    ANSI_YELLOW              = "\u001b[33m"
-    ANSI_BLUE                = "\u001b[34m"
-    ANSI_MAGENTA             = "\u001b[35m"
-    ANSI_CYAN                = "\u001b[36m"
-    ANSI_WHITE               = "\u001b[37m"
-
-    ANSI_BG_BLACK            = "\u001b[40m"
-    ANSI_BG_RED              = "\u001b[41m"
-    ANSI_BG_GREEN            = "\u001b[42m"
-    ANSI_BG_YELLOW           = "\u001b[43m"
-    ANSI_BG_BLUE             = "\u001b[44m"
-    ANSI_BG_MAGENTA          = "\u001b[45m"
-    ANSI_BG_CYAN             = "\u001b[46m"
-    ANSI_BG_WHITE            = "\u001b[47m"
-
-    @classmethod
-    def title(cls, title: str):
-        length = len(title)
-        ppsl = 4
-        ps = '*' * (length + (ppsl * 2) + 2)
-        pps = '*' * ppsl
-        if length > 0:
-            print(f"{Print.ANSI_BG_WHITE}{Print.ANSI_BLACK}{ps}\n{pps} {title} {pps}\n{ps}{Print.ANSI_CLEAR}{Print.ANSI_CLEOL}")
-    
-    @classmethod    
-    def green(cls, output: str):
-        color = Print.ANSI_GREEN
-        eol = Print.ANSI_CLEOL
-        clear = Print.ANSI_CLEAR
-        print(f"{color}{output}{eol}{clear}")
-
-
-    @classmethod
-    def green_bg(cls, output: str):
-        color = f"{Print.ANSI_BG_GREEN}{Print.ANSI_BLACK}"
-        eol = Print.ANSI_CLEOL
-        clear = Print.ANSI_CLEAR
-        print(f"{color}{output}{eol}{clear}")
-
-    @classmethod
-    def red_bg(cls, output: str):
-        color = f"{Print.ANSI_BG_RED}{Print.ANSI_BLACK}"
-        eol = Print.ANSI_CLEOL
-        clear = Print.ANSI_CLEAR
-        print(f"{color}{output}{eol}{clear}")
-
-    @classmethod
-    def magenta_bg(cls, output: str):
-        color = f"{Print.ANSI_BG_MAGENTA}{Print.ANSI_BLACK}"
-        eol = Print.ANSI_CLEOL
-        clear = Print.ANSI_CLEAR
-        print(f"{color}{output}{eol}{clear}")
-
-    @classmethod
-    def label_value(cls, label: str, value):
-        """ Output in the form of =>  label               : value """
-        # color = f"{Print.ANSI_BG_GREEN}{Print.ANSI_BLACK}"
-        # eol = Print.ANSI_CLEOL
-        # clear = Print.ANSI_CLEAR
-        # print(f"{color}{output}{eol}{clear}")
-        print(f"{label:<50} : {value}")
-
-    @classmethod
-    def progress(cls, complete, total, char_width=80):
-        """ Create dynmaically updating progress bar """
-        to_check = ( complete, total, char_width )
-        if not all( type(i) is int for i in to_check):
-            raise TypeError(f"all inputs must be of type int, {to_check}")
-        complete = complete + 1
-        to_check = ( complete, total, char_width )
-        if total != 0 and char_width != 0:
-            interval = total / char_width
-        if any( i == 0 for i in to_check):
-            raise ValueError(f"Inputs can not be 0, {to_check}")
-        else:
-            mod = ( interval ) % complete == 0
-            percent = complete / total
-            intervals = round( complete / interval)
-        if mod == 0:
-            print(f"{cls.ANSI_CLSML}{cls.ANSI_RSCUR} 0% [{percent:6.01%}] |{intervals * '='}" + ( " " * ( char_width - intervals ) ) + "| 100%", end='')
-        if complete == total:
-            print("... complete")
+from enum import Enum, auto
 
 
 class NetboxQuery(Enum):
@@ -132,6 +46,13 @@ class NetboxQuery(Enum):
     DATACENTERS           = "/dcim/sites/"
     DEVICES               = "/dcim/devices/"
     DEVICE                = ( "/dcim/devices/", "id" )
+
+
+class RESULT(Enum):
+    """ Inband signifier of result """
+
+    NULL = auto()
+    UNINIT = auto()
 
 
 
@@ -148,13 +69,14 @@ class NetboxData:
     # must pass the object as a string because of issues with forward references
     # to place the newly created object into the ``local_attr`` attribute of the instance
     field_to_object_map = {
-        "device":       { "class": "Device", "obj_attr": "_device" },
-        "site":         { "class": "DataCenter", "obj_attr": "_datacenter" },
-        "datacenter":   { "class": "DataCenter", "obj_attr": "_datacenter" },
-        "rack":         { "class": "Rack", "obj_attr": "_rack" },
-        "interface":    { "class": "Interface", "obj_attr": "_interface" },
-        "interface_a":  { "class": "Interface", "obj_attr": "_interface_a" },
-        "interface_b":  { "class": "Interface", "obj_attr": "_interface_b" }
+        "device":           { "class": "Device", "obj_attr": "_device" },
+        "parent_device":    { "class": "Device", "obj_attr": "_parent_device" },
+        "site":             { "class": "DataCenter", "obj_attr": "_datacenter" },
+        "datacenter":       { "class": "DataCenter", "obj_attr": "_datacenter" },
+        "rack":             { "class": "Rack", "obj_attr": "_rack" },
+        "interface":        { "class": "Interface", "obj_attr": "_interface" },
+        "interface_a":      { "class": "Interface", "obj_attr": "_interface_a" },
+        "interface_b":      { "class": "Interface", "obj_attr": "_interface_b" }
     }
 
     def updateFromJson(self: T, jd: Dict[str, Any]) -> T:
@@ -179,26 +101,49 @@ class NetboxData:
                 The object provided by ``merge_object`` is updated
 
         """
-        print(f"{'*'*30} jd into (NetboxData) {cls.__name__}.jsonToObj {'*'*30} ---->")
-        pprint(jd)
-        print(f"<---- {'*'*30} jd into {cls.__name__}.jsonToObj {'*'*30}")
+        debug(f"{'*'*30} jd into (NetboxData) {cls.__name__}.jsonToObj {'*'*30} ---->")
+        trace(jd)
+        if type(jd) is not dict:
+            raise ValueError(f"jd is not a dict: {jd}")
+            # return jd
+        if "detail" in jd.keys() and jd["detail"] == "Not found.":
+            Print.red_bg("not found with")
+        debug(f"<---- {'*'*30} jd into {cls.__name__}.jsonToObj {'*'*30}")
         if "url" in jd:
             if cast(str, jd["url"]).find(NetboxQuery[f"{cls.__name__}S".upper()].value) == -1:
                 return jd
         elif not all([True if identifier_field in jd else False for identifier_field in cls._identifier_fields ]):
             info(f"identifier_fields{cls._identifier_fields} check did not pass")
             return jd
-        print(f"{'*'*30} PASS (NetboxData) {cls.__name__}.jsonToObj {'*'*30}")
+        debug(f"{'*'*30} PASS (NetboxData) {cls.__name__}.jsonToObj {'*'*30}")
         # copy jd into obj_args,
         # ``obj_args`` will be passed into class to create new instance
-        obj_args = jd
+        obj_args = deepcopy(jd)
         for json_field, field in cls.field_to_object_map.items():
             if json_field in obj_args:
                 obj_attr = json_field if len(field) == 1 else field["obj_attr"]
-                Print.green_bg(f"**{cls.__name__}.jsonToObj ; setting {obj_attr} from {json_field}")
-                obj_args[obj_attr] = str_to_class(field["class"]).jsonToObj(jd[json_field]) if json_field in jd and type(jd[json_field]["id"]) is int else None
+                Print.magenta_bg(f"**{cls.__name__}.jsonToObj ; setting {obj_attr} from {json_field}" +
+                                 f"\n\ttype(field) = {type(field)}" +
+                                 f"\n\ttype(jd) = {type(jd)}" )
+                # try:
+                #     print("str to class: ", end="")
+                #     print(str_to_class(field["class"]))
+                #     print("jd: ", end="")
+                #     pprint(jd)
+                #     print("jsonToObj: ", end="")
+                #     print(str_to_class(field["class"]).jsonToObj(jd[json_field]))
+                #     print("jd[json_field]: ", end="")
+                #     print(jd[json_field])
+                #     print(type(jd[json_field]["id"]))
+                # except Exception as e: print(e)
+                if jd[json_field] is None:
+                    obj_args[obj_attr] = RESULT.NULL
+                elif type(jd[json_field]) is str_to_class(field["class"]):
+                    Print.cyan(f"The field {json_field} is already of {type(jd[json_field])}")
+                else:
+                    obj_args[obj_attr] = str_to_class(field["class"]).jsonToObj(jd[json_field]) if json_field in jd and type(jd[json_field]["id"]) is int else None
                 obj_args.pop(json_field)  # remove json_field
-        print(f"cls={cls}")
+        debug(f"cls={cls}")
         instance = cls( **obj_args )
         return instance
 
@@ -214,13 +159,15 @@ class NetboxData:
     @classmethod
     def setattr_helper(cls, attr_name: str, values) -> Any:
         """ Return mapped field if necessary (for objects) """
-        Print.magenta_bg(f"setattr_helper\nattr_name: {attr_name}\nvalues: {values}")
-        if attr_name in cls.field_to_object_map and cls.field_to_object_map[attr_name]["obj_attr"] in values:
-            Print.green_bg(f"found {attr_name}")
-            return values[cls.field_to_object_map[attr_name]["obj_attr"]]
-        if attr_name in values:
-            return values[attr_name]
-        return None
+        debug(f"setattr_helper\nattr_name: {attr_name}\nvalues: {values}")
+        if attr_name in cls.field_to_object_map and cls.field_to_object_map[attr_name]["obj_attr"] in values and cls.field_to_object_map[attr_name]["obj_attr"]:
+            debug(f"found {attr_name}")
+            return_value = values[cls.field_to_object_map[attr_name]["obj_attr"]]
+        elif attr_name in values:
+            return_value = values[attr_name]
+        else:
+            return_value = RESULT.UNINIT
+        return return_value
 
     @property
     def datacenter(self) -> "DataCenter":
@@ -232,9 +179,21 @@ class NetboxData:
     @property
     def rack(self) -> "Rack":
         """ Return DataCenter object """
+        Print.red(f"parent_device={type(self.parent_device)}\_rack={type(self._rack)}")
         if type(self._rack) is not Rack:
             NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
-        return self._rack
+            Print.red(f"parent_device={type(self.parent_device)}")
+            if type(self.parent_device) is Device:
+                Print.red(f"parent_device.rack={self.parent_device.rack}")
+                self._rack = self.parent_device.rack
+        if self._rack is not None:
+            return self._rack
+        import traceback
+        print("<-----traceback---->")
+        traceback.print_stack()
+        traceback.print_exc()
+        print("<-----traceback---->")
+        raise Exception(f"rack not found on {self} with id={self.id}")
 
     @property
     def device(self) -> "Device":
@@ -242,13 +201,29 @@ class NetboxData:
         if type(self._device) is not Device:
             NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
         return self._device
+    
+    @property
+    def parent_device(self) -> "Device":
+        """ Return Device object of parent if present"""
+        Print.red_bg(f"querying{self.__class__.__name__}.{self.id} ; parent_device={self._parent_device}")
+        if type(self._parent_device) is not Device:
+            NetboxRequest(NetboxQuery[self.__class__.__name__.upper()], {"id": self.id}, self)
+        if self._parent_device is not None:
+            return self._parent_device
+
 
     @classmethod
     @property
     def query_class_all(cls) -> NetboxQuery:
         """ Return endpoint for this device """
         return NetboxQuery[f"{cls.__name__.__name__.upper()}S"]
-    
+
+    def __setstate__(self, state):
+        debug(f"{'*'*40} setstate={state}")
+
+    def __getnewargs_ex__(self) -> Tuple[Tuple, Dict]:
+        return ((), self.__dict__)
+
 
 
 
@@ -257,8 +232,9 @@ class NetboxRequest:
     """ HTTP request to netbox """
 
     _BASE_URL = "https://netbox.roblox.local/api"
+    cache_dir = os.path.abspath( os.path.join( __file__, "..", "..", "data_cache" ) )
 
-    def __init__(self, query_endpoint: NetboxQuery, query_parameters: Dict[str, any], update_obj = None, limit: int=None) -> None:
+    def __init__(self, query_endpoint: NetboxQuery, query_parameters: Dict[str, any], update_obj = None, limit: int=None, json_callback: Callable = None) -> None:
         """ Create initial params for Request
 
         query_endpoint : NetboxQuery
@@ -270,35 +246,110 @@ class NetboxRequest:
         limit : int
             limit the number of returned results
         """
-        # query_parameters = {"q": rack.name, "site": rack.datacenter.name.lower()}
+        self.query_parameters = copy(query_parameters)
+        self.query_endpoint   = query_endpoint
+        self.json_callback    = json_callback
+        self.update_obj       = update_obj
+        debug(f"NetboxRequest !!! self.query_parameters -> {self.query_parameters}")
+        # for k, v in query_parameters.items():
+        #     try:
+        #         raise Exception(f"this->{k}={v}")
+        #     except Exception as e:
+        #         print(e)
         if limit is not None and type(limit) is int and limit > 0:
             query_parameters["limit"] = limit
-
-        if type(query_endpoint.value) is tuple and query_endpoint.value[1] == "id":
-            query_endpoint_str = (
-                str(query_endpoint.value[0]) +
-                str(query_parameters.pop(query_endpoint.value[1])) +
+        if type(self.query_endpoint.value) is tuple and self.query_endpoint.value[1] == "id":
+            self.query_endpoint_str = (
+                str(self.query_endpoint.value[0]) +
+                str(query_parameters.pop(self.query_endpoint.value[1])) +
                 str("/")
             )
         else:
             #NOTE: kill
             query_parameters["limit"] = 5
-            query_endpoint_str = str(query_endpoint.value)
-        self.response: requests.Response = requests.get(
-            self._BASE_URL + query_endpoint_str,
-            query_parameters,
-            headers=NETBOX_SEND_HEADERS,
-            verify=False)
-        debug(self.response.status_code)
-        if update_obj is not None and hasattr(update_obj, "updateFromJson"):
-            self.response.json(object_hook=update_obj.updateFromJson)
+            self.query_endpoint_str = str(self.query_endpoint.value)
+        if not self.load_from_cache():
+            Print.red_bg(f"cache **MISS** -> NetboxRequest !!! endpoint={self.query_endpoint} ; query_parameters -> {self.query_parameters}/{query_parameters} ; query_endpoint_str -> {self.query_endpoint_str}")
+            self.response: requests.Response = requests.get(
+                self._BASE_URL + self.query_endpoint_str,
+                query_parameters,
+                headers=NETBOX_SEND_HEADERS,
+                verify=False)
+            debug(self.response.status_code)
+            if self.response:
+                self.set_to_cache()
+        if self.update_obj is not None and hasattr(update_obj, "updateFromJson"):
+            self.response.json(object_hook=self.update_obj.updateFromJson)
 
 
-    def toJSON(self) -> object:
+
+    @property
+    def get_pickle_file_name(self) -> str:
+        """ Create standard pickle file name from query and endpoint return String """
+        # input(self.query_endpoint.__repr__())
+        # input(sorted(self.query_parameters.items()).__repr__())
+        encoded_query = base64.b32encode(self.query_endpoint.__repr__().encode() + sorted(self.query_parameters.items()).__repr__().encode()).decode()
+        pkl_file_name = os.path.join(self.cache_dir, f'cache_{encoded_query}.pkl')
+        input(f"Confirm:\n\tpkl_file_name: {pkl_file_name}\n\tcache_dir: {self.cache_dir}\n\tself.query_endpoint.__repr__().encode(): {self.query_endpoint.__repr__().encode()}\n\tsorted(self.query_parameters.items()).__repr__().encode(){sorted(self.query_parameters.items()).__repr__().encode()}\n???")
+        return pkl_file_name
+
+
+    def load_from_cache(self) -> bool:
+        """ Check cache, if query is present, set self._json and return True, else return False """
+        pkl_file_name = self.get_pickle_file_name
+        if os.path.isfile(pkl_file_name):
+            with open(pkl_file_name, 'rb') as f:
+                try:
+                    Print.green_bg(f"loading...NetboxQuery from {pkl_file_name}")
+                    # input("pickle continue?")
+                    self.response = pickle.load(f)
+                    return True
+                except EOFError as e:
+                    Print.red_bg(f"pickle file invalid -> {pkl_file_name}")
+                    raise e
+                    return False
+        return False
+
+
+    def set_to_cache(self) -> None:
+        """ Take query param encode as filename and save json of this query """
+        pkl_file_name = self.get_pickle_file_name
+        with open(pkl_file_name, 'wb') as f:
+            # Pickle using the highest protocol available.
+            Print.magenta_bg(f"pickling {self.response} into {pkl_file_name}")
+            pickle.dump(self.response, f, pickle.HIGHEST_PROTOCOL)
+            debug(f"pickle of {self.response} is complete")
+
+
+    @property
+    def read_response(self):
+        """ read self.response and output """
+        if self.json_callback is not None:
+            Print.cyan("json_callback is present for NetboxQuery")
+            self._json = self.response.json(object_hook=self.json_callback)
+            self._results  = self._json["results"]
+        else:
+            Print.cyan("json_callback is NOT present for NetboxQuery, returning original json.")
+            self._json = self.response.json()
+            if 'results' in self._json:
+                self._results  = self._json["results"]
+            else:
+                Print.red(f"**query returned no results**\nquery: {self.query_parameters}\nendpoint: {self.query_endpoint}\n_json: {self.response.json()}")
+                input("continue?")
+
+    @property
+    def json(self) -> object:
         """ Return json from response """
-        j = self.response.json()
+        self.read_response
+        j = self._json
         debug(json.dumps(j, indent=4))
         return j
+    
+    @property
+    def results(self) -> object:
+        """ JSON TO results via callback """
+        self.read_response
+        return self._results
 
 
 class DataCenter(Multiton, NetboxData):
@@ -308,7 +359,7 @@ class DataCenter(Multiton, NetboxData):
     _identifier_fields = { "name": True, "physical_address": True }
 
     def __init__(self, **kwargs):
-        Print.red_bg(f"creating DataCenter object from {kwargs}")
+        debug(f"creating DataCenter object from {kwargs}")
         self.id_site: int = None
         self.name: str
         self.Racks: list = []
@@ -316,7 +367,7 @@ class DataCenter(Multiton, NetboxData):
 
         for key, val in kwargs.items():
             setattr(self, key, val)
-        Print.red_bg(f"created -> DataCenter object from {self.__dict__}")
+        debug(f"created -> DataCenter object from {self.__dict__}")
 
     @classmethod
     def equivalency(cls, origin, test) -> bool:
@@ -342,8 +393,6 @@ class Rack(Multiton, NetboxData):
         self._datacenter: DataCenter = self.__class__.setattr_helper("datacenter", kwargs)
 
         self.u_height: int = None
-
-        self.obj_idx = None
 
         self.devices: list = []
         for key, val in kwargs.items():
@@ -378,12 +427,12 @@ class Device(Multiton, NetboxData):
         self.id: int                    = kwargs["id"] if "id" in kwargs else None
         self._datacenter: DataCenter    = self.__class__.setattr_helper("datacenter", kwargs)
         self._rack: Rack                = self.__class__.setattr_helper("rack", kwargs)
+        self._parent_device: Device     = self.__class__.setattr_helper("parent_device", kwargs)
         self.url: str                   = kwargs["url"] if "url" in kwargs else None
         self.name: str                  = kwargs["name"] if "name" in kwargs else None
         self.display_name: str          = kwargs["display_name"] if "display_name" in kwargs else None
         self.asset_tag: str             = kwargs["asset_tag"] if "asset_tag" in kwargs else None
         self.rack_unit: int             = kwargs["rack_unit"] if "rack_unit" in kwargs else None
-        self.obj_idx                    = None
         # for key, val in kwargs.items():
         #     setattr(self, key, val)
 
@@ -443,8 +492,6 @@ class Interface(Multiton, NetboxData):
         self.mac_address: Optional[str] = kwargs["mac_address"] if "mac_address" in kwargs else None
         self.mgmt_only: bool            = kwargs["mgmt_only"] if "mgmt_only" in kwargs else None
         self.description: str           = kwargs["description"] if "description" in kwargs else None
-        self.obj_idx = None
-    
 
 
 class InterfaceConnection(Multiton, NetboxData):
@@ -467,9 +514,9 @@ class InterfaceConnection(Multiton, NetboxData):
                 query_parameters["q"] = rack.lower()
             elif type(rack) is Rack:
                 query_parameters["q"] = rack.name.lower()
-        r = NetboxRequest(NetboxQuery.INTERFACECONNECTIONS, query_parameters)
-        pprint(r.__dict__)
-        return r.response.json(object_hook=InterfaceConnection.jsonToObj)["results"]
+        r = NetboxRequest(NetboxQuery.INTERFACECONNECTIONS, query_parameters, json_callback = InterfaceConnection.jsonToObj)
+        trace(r.__dict__)
+        return r.results
 
     def __init__(self, **kwargs):
         """ Create """
@@ -485,10 +532,12 @@ class InterfaceConnection(Multiton, NetboxData):
 
     def getSheetRowData(self) -> RowData:
         """ Create RowData for Sheets from this object """
+        Print.red_bg(f"A={self.interface_a.device.id} ... B={self.interface_b.device.id}")
+        # input("continue?")
         return RowData(
             [
                 # checkbox
-                CellData( 
+                CellData(
                     userEnteredValue = ExtendedValue( True if self.connection_status["value"] is True else False ),
                     dataValidation = sheet.DataValidationRule( sheet.BooleanCondition( sheet.ConditionType.BOOLEAN ) )
                 ),
@@ -507,13 +556,13 @@ class InterfaceConnection(Multiton, NetboxData):
     @property
     def interface_a(self) -> Interface:
         """ Return DataCenter object """
-        if type(self._interface_a) is not Rack:
+        if type(self._interface_a) is not Interface:
             NetboxRequest(NetboxQuery.INTERFACE, {"id": self.id}, self)
         return self._interface_a
 
     @property
     def interface_b(self) -> Interface:
         """ Return DataCenter object """
-        if type(self._interface_b) is not Rack:
+        if type(self._interface_b) is not Interface:
             NetboxRequest(NetboxQuery.INTERFACE, {"id": self.id}, self)
         return self._interface_b
